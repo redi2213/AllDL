@@ -6,6 +6,14 @@ on:
       file_url:
         description: 'Direct file URL'
         required: true
+      zip_it:
+        description: 'Zip the file (true/false)'
+        required: false
+        default: 'false'
+      custom_name:
+        description: 'Custom filename without extension'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -14,18 +22,28 @@ jobs:
   download:
     runs-on: ubuntu-latest
     steps:
-      - name: Install aria2
-        run: sudo apt-get update && sudo apt-get install -y aria2
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y aria2 zip
 
       - name: Download file
         id: dl
         run: |
-          FILENAME=$(basename "${{ github.event.inputs.file_url }}" | cut -d'?' -f1)
-          if [ -z "$FILENAME" ]; then
-            FILENAME="downloaded_file"
+          ORIGINAL_NAME=$(basename "${{ github.event.inputs.file_url }}" | cut -d'?' -f1)
+          EXT="${ORIGINAL_NAME##*.}"
+          if [ -z "${{ github.event.inputs.custom_name }}" ]; then
+            FILENAME="$ORIGINAL_NAME"
+          else
+            FILENAME="${{ github.event.inputs.custom_name }}.$EXT"
           fi
+
           aria2c -x 16 -s 16 -k 1M -o "$FILENAME" "${{ github.event.inputs.file_url }}"
-          echo "filename=$FILENAME" >> $GITHUB_OUTPUT
+
+          if [ "${{ github.event.inputs.zip_it }}" = "true" ]; then
+            zip "${FILENAME}.zip" "$FILENAME"
+            echo "filename=${FILENAME}.zip" >> $GITHUB_OUTPUT
+          else
+            echo "filename=$FILENAME" >> $GITHUB_OUTPUT
+          fi
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
