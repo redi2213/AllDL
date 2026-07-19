@@ -14,6 +14,11 @@ on:
         description: 'Custom filename without extension'
         required: false
         default: ''
+      job_id:
+        description: 'Unique job id'
+        required: true
+
+run-name: "${{ inputs.job_id }}"
 
 permissions:
   contents: write
@@ -48,7 +53,7 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: run-${{ github.run_id }}
+          tag_name: ${{ github.event.inputs.job_id }}
           files: ${{ steps.dl.outputs.filename }}
           prerelease: true
-          name: "Upload run-${{ github.run_id }}"
+          name: "Upload ${{ github.event.inputs.job_id }}"
