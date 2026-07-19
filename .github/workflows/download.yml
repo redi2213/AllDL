@@ -1,0 +1,33 @@
+name: Download and Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      file_url:
+        description: 'Direct file URL'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download file
+        id: dl
+        run: |
+          FILENAME=$(basename "${{ github.event.inputs.file_url }}" | cut -d'?' -f1)
+          if [ -z "$FILENAME" ]; then
+            FILENAME="downloaded_file"
+          fi
+          wget -q --show-progress -O "$FILENAME" "${{ github.event.inputs.file_url }}"
+          echo "filename=$FILENAME" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: run-${{ github.run_id }}
+          files: ${{ steps.dl.outputs.filename }}
+          prerelease: true
+          name: "Upload run-${{ github.run_id }}"
