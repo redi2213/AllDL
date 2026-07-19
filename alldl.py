@@ -12,7 +12,11 @@ RESULTS_FILE = "/storage/self/primary/0cdn/linkx/dlyes.txt"
 REPO = "redi2213/AllDL"
 API = f"https://api.github.com/repos/{REPO}"
 
+# How long the Termux script waits for a job to finish before moving on
+POLL_GIVEUP_SECONDS = 5 * 60
+
 print_lock = threading.Lock()
+file_lock = threading.Lock()
 
 
 def load_token():
@@ -51,7 +55,14 @@ def log(tag, msg):
         print(f"[{tag}] {msg}")
 
 
-def process_link(headers, file_url, zip_it, custom_name, results):
+def save_result(file_url, result_text):
+    os.makedirs(os.path.dirname(RESULTS_FILE), exist_ok=True)
+    with file_lock:
+        with open(RESULTS_FILE, "a") as f:
+            f.write(f"{file_url} -> {result_text}\n")
+
+
+def process_link(headers, file_url, zip_it, custom_name):
     job_id = uuid.uuid4().hex[:10]
     tag = job_id
     label = custom_name if custom_name else file_url.split("/")[-1][:20]
@@ -74,7 +85,7 @@ def process_link(headers, file_url, zip_it, custom_name, results):
         r.raise_for_status()
     except Exception as e:
         log(label, f"Dispatch failed: {e}")
-        results[file_url] = None
+        save_result(file_url, "FAILED (dispatch error)")
         return
 
     log(label, "Waiting for run to appear...")
@@ -93,12 +104,13 @@ def process_link(headers, file_url, zip_it, custom_name, results):
 
     if not run_id:
         log(label, "Could not find run, giving up")
-        results[file_url] = None
+        save_result(file_url, "FAILED (run not found)")
         return
 
-    log(label, f"Run found (id={run_id}), downloading on GitHub...")
+    log(label, f"Run found (id={run_id}), tracking...")
     last_status = None
-    while True:
+    waited = 0
+    while waited < POLL_GIVEUP_SECONDS:
         r = requests.get(f"{API}/actions/runs/{run_id}", headers=headers)
         if r.status_code == 200:
             data = r.json()
@@ -109,10 +121,15 @@ def process_link(headers, file_url, zip_it, custom_name, results):
             if status == "completed":
                 if data["conclusion"] != "success":
                     log(label, f"FAILED: {data['conclusion']}")
-                    results[file_url] = None
+                    save_result(file_url, f"FAILED ({data['conclusion']})")
                     return
                 break
         time.sleep(4)
+        waited += 4
+    else:
+        log(label, "Still running after 5 min, moving on (check GitHub Releases later)")
+        save_result(file_url, f"PENDING (still running, tag: {tag})")
+        return
 
     log(label, "Fetching release link...")
     for _ in range(10):
@@ -122,12 +139,12 @@ def process_link(headers, file_url, zip_it, custom_name, results):
             if assets:
                 link = assets[0]["browser_download_url"]
                 log(label, f"DONE: {link}")
-                results[file_url] = link
+                save_result(file_url, link)
                 return
         time.sleep(3)
 
     log(label, "Could not get release link")
-    results[file_url] = None
+    save_result(file_url, "FAILED (no release link)")
 
 
 def main():
@@ -138,20 +155,12 @@ def main():
     print("2. Read links from file")
     choice = input("Choice (1/2): ").strip()
 
-    links = []
-    zip_it = False
-    custom_name = ""
-
     if choice == "1":
         file_url = input("Enter file URL: ").strip()
         if not file_url:
             print("URL required")
             sys.exit(1)
         links = [file_url]
-        zip_it = ask_yes_no("Zip the file")
-        rename = ask_yes_no("Rename the file")
-        if rename:
-            custom_name = input("Enter new name (no extension): ").strip()
     elif choice == "2":
         if not os.path.exists(LINKS_FILE):
             print(f"File not found: {LINKS_FILE}")
@@ -161,17 +170,29 @@ def main():
         if not links:
             print("No links found in file")
             sys.exit(1)
-        print(f"Found {len(links)} link(s), uploading all in parallel...")
+        print(f"Found {len(links)} link(s)")
     else:
         print("Invalid choice")
         sys.exit(1)
 
-    results = {}
+    # Ask everything up front so nothing blocks mid-run
+    zip_it = ask_yes_no("Zip the file(s)")
+    rename = ask_yes_no("Rename the file(s)")
+    base_name = ""
+    if rename:
+        base_name = input("Enter new name (no extension): ").strip()
+
+    print("\nStarting all uploads in parallel...\n")
+
     threads = []
-    for link in links:
+    for i, link in enumerate(links, start=1):
+        if rename and base_name:
+            custom_name = f"{base_name}_{i}" if len(links) > 1 else base_name
+        else:
+            custom_name = ""
         t = threading.Thread(
             target=process_link,
-            args=(headers, link, zip_it, custom_name, results),
+            args=(headers, link, zip_it, custom_name),
         )
         t.start()
         threads.append(t)
@@ -180,23 +201,8 @@ def main():
     for t in threads:
         t.join()
 
-    print("\n" + "=" * 60)
-    print("ALL RESULTS")
-    print("=" * 60)
-
-    os.makedirs(os.path.dirname(RESULTS_FILE), exist_ok=True)
-    with open(RESULTS_FILE, "a") as f:
-        for link in links:
-            result = results.get(link)
-            if result:
-                print(f"{link}\n -> {result}\n")
-                f.write(f"{link} -> {result}\n")
-            else:
-                print(f"{link}\n -> FAILED\n")
-                f.write(f"{link} -> FAILED\n")
-
-    print("=" * 60)
-    print(f"Saved to: {RESULTS_FILE}")
+    print("\nAll jobs finished. Results saved to:")
+    print(RESULTS_FILE)
 
 
 if __name__ == "__main__":

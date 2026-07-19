@@ -26,6 +26,7 @@ permissions:
 jobs:
   download:
     runs-on: ubuntu-latest
+    timeout-minutes: 340
     steps:
       - name: Install tools
         run: sudo apt-get update && sudo apt-get install -y aria2 zip
@@ -41,7 +42,13 @@ jobs:
             FILENAME="${{ github.event.inputs.custom_name }}.$EXT"
           fi
 
-          aria2c -x 16 -s 16 -k 1M -o "$FILENAME" "${{ github.event.inputs.file_url }}"
+          aria2c \
+            -x 16 -s 16 -k 1M \
+            --connect-timeout=20 \
+            --max-tries=5 \
+            --retry-wait=5 \
+            -o "$FILENAME" \
+            "${{ github.event.inputs.file_url }}"
 
           if [ "${{ github.event.inputs.zip_it }}" = "true" ]; then
             zip "${FILENAME}.zip" "$FILENAME"
