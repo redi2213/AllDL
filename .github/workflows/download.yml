@@ -14,6 +14,9 @@ jobs:
   download:
     runs-on: ubuntu-latest
     steps:
+      - name: Install aria2
+        run: sudo apt-get update && sudo apt-get install -y aria2
+
       - name: Download file
         id: dl
         run: |
@@ -21,7 +24,7 @@ jobs:
           if [ -z "$FILENAME" ]; then
             FILENAME="downloaded_file"
           fi
-          wget -q --show-progress -O "$FILENAME" "${{ github.event.inputs.file_url }}"
+          aria2c -x 16 -s 16 -k 1M -o "$FILENAME" "${{ github.event.inputs.file_url }}"
           echo "filename=$FILENAME" >> $GITHUB_OUTPUT
 
       - name: Create Release
